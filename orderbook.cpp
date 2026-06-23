@@ -29,14 +29,13 @@ struct Order {
 template <typename T, size_t PoolSize>
 class MemoryPool {
 private:
-    std::array<T, PoolSize> pool;
+    std::vector<T> pool;
     std::vector<T*> free_list;
     std::mutex lock;
 
 public:
-    MemoryPool() {
+    MemoryPool() : pool(PoolSize) {
         free_list.reserve(PoolSize);
-        // Populate free list with pointers to the pre-allocated array
         for (size_t i = 0; i < PoolSize; ++i) {
             free_list.push_back(&pool[i]);
         }
@@ -179,8 +178,11 @@ void simulateTrading(OrderBook& book, MemoryPool<Order, 1000000>& pool, int thre
 }
 
 int main() {
-    MemoryPool<Order, 1000000> global_pool;
-    OrderBook book(global_pool);
+    // 1. Allocate the massive 40MB pool on the heap instead of the stack
+    auto global_pool = std::make_unique<MemoryPool<Order, 1000000>>();
+    
+    // 2. Dereference it when passing to the order book
+    OrderBook book(*global_pool);
     
     const int num_threads = 4;
     const int orders_per_thread = 100000;
@@ -189,14 +191,15 @@ int main() {
     std::vector<std::thread> workers;
     std::vector<std::vector<double>> thread_latencies(num_threads);
 
-    for(int i=0; i<num_threads; ++i) {
+    for(int i = 0; i < num_threads; ++i) {
         thread_latencies[i].reserve(orders_per_thread);
     }
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < num_threads; ++i) {
-        workers.emplace_back(simulateTrading, std::ref(book), std::ref(global_pool), i, orders_per_thread, std::ref(thread_latencies[i]));
+        // 3. Dereference the pool here as well so std::ref binds to the object
+        workers.emplace_back(simulateTrading, std::ref(book), std::ref(*global_pool), i, orders_per_thread, std::ref(thread_latencies[i]));
     }
 
     for (auto& t : workers) t.join();
