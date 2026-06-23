@@ -14,18 +14,15 @@
 
 enum class Side { BUY, SELL };
 
-// 1. Plain Old Data (POD) structure. NO std::string allowed.
 struct Order {
     uint64_t order_id;
     uint64_t timestamp;
     Side side;
-    int64_t price_ticks; // Price represented as integer ticks (e.g., $100.05 = 10005)
+    int64_t price_ticks;
     int volume;
     uint32_t client_id;
 };
 
-// 2. Thread-Safe Memory Pool
-// Pre-allocates all memory at startup to avoid OS-level heap allocation during runtime.
 template <typename T, size_t PoolSize>
 class MemoryPool {
 private:
@@ -57,7 +54,6 @@ public:
 
 class OrderBook {
 private:
-    // Using raw pointers managed by our Memory Pool instead of std::shared_ptr
     std::map<int64_t, std::list<Order*>> asks;
     std::map<int64_t, std::list<Order*>, std::greater<int64_t>> bids;
     
@@ -66,7 +62,7 @@ private:
     std::unordered_map<int64_t, int> bid_volume_map;
     
     mutable std::shared_mutex rw_lock;
-    MemoryPool<Order, 1000000>& order_pool; // Reference to our global pool
+    MemoryPool<Order, 1000000>& order_pool;
 
 public:
     OrderBook(MemoryPool<Order, 1000000>& pool) : order_pool(pool) {}
@@ -99,9 +95,9 @@ public:
             asks[order->price_ticks].erase(it->second);
             if (asks[order->price_ticks].empty()) asks.erase(order->price_ticks);
         }
-        
+
         order_map.erase(it);
-        order_pool.deallocate(order); // Return memory to the pool
+        order_pool.deallocate(order);
     }
 
 private:
@@ -151,15 +147,14 @@ private:
 void simulateTrading(OrderBook& book, MemoryPool<Order, 1000000>& pool, int thread_id, int num_orders, std::vector<double>& latencies) {
     std::mt19937 rng(1337 + thread_id);
     std::uniform_int_distribution<int> side_dist(0, 1);
-    std::uniform_int_distribution<int64_t> price_dist(9950, 10050); // Ticks around $100.00
+    std::uniform_int_distribution<int64_t> price_dist(9950, 10050);
     std::uniform_int_distribution<int> vol_dist(10, 100);
 
     for (int i = 0; i < num_orders; ++i) {
-        // Allocate from pool instead of 'new'
         Order* order = pool.allocate();
-        if (!order) continue; // Skip if pool is exhausted
+        if (!order) continue;
 
-        order->order_id = ((uint64_t)thread_id << 32) | i; // Unique ID bitwise math
+        order->order_id = ((uint64_t)thread_id << 32) | i;
         order->timestamp = i;
         order->side = (side_dist(rng) == 0) ? Side::BUY : Side::SELL;
         order->price_ticks = price_dist(rng);
@@ -178,10 +173,8 @@ void simulateTrading(OrderBook& book, MemoryPool<Order, 1000000>& pool, int thre
 }
 
 int main() {
-    // 1. Allocate the massive 40MB pool on the heap instead of the stack
     auto global_pool = std::make_unique<MemoryPool<Order, 1000000>>();
     
-    // 2. Dereference it when passing to the order book
     OrderBook book(*global_pool);
     
     const int num_threads = 4;
@@ -198,7 +191,6 @@ int main() {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < num_threads; ++i) {
-        // 3. Dereference the pool here as well so std::ref binds to the object
         workers.emplace_back(simulateTrading, std::ref(book), std::ref(*global_pool), i, orders_per_thread, std::ref(thread_latencies[i]));
     }
 
