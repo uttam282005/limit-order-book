@@ -8,8 +8,6 @@
 #include <chrono>
 #include <thread>
 #include <random>
-#include <array>
-#include <numeric>
 #include <algorithm>
 
 enum class Side { BUY, SELL };
